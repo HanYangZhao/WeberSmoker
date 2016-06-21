@@ -14,16 +14,18 @@
 // initialize the Thermocouple
 Adafruit_MAX31855 thermocouple(MAXCLK, MAXCS, MAXDO);
 const char *ssid = "webersmoker";
-const char *password = "webersmoker";
+const char *password = "saintbbq";
 
 ESP8266WebServer server(80);
  
 double tempC = 0.0;
 double tempF = 0.0;
 int tempSet = 0;
-int probe1Temp = 0;
+int controllerState = 0;
 int probe2Temp = 0;
 int probe3Temp = 0;
+int tempTextColor = 3368448;
+int controllerStateColor = 39168;
 // Generally, you should use "unsigned long" for variables that hold time
 unsigned long previousMillis = 0;        // will store last temp was read
 unsigned long webUpdatePreviousMillis = 0; 
@@ -51,20 +53,20 @@ void handleRoot(){
       <body>\
         <h1>Weber Smoker Web Controller</h1>\
         <p>Uptime: %02d:%02d:%02d</p>\
-        <p>Temperature Celsius: %02d C </p>\
-        <p>Temperature Farenheit: %02d F</p>\
-        <p>Temperature Set : %02d F </p>\
-        <p>Probe 1 Temp : %02d F </p>\
+        <p><h2 style=\"color:#%x;\"> Temperature Celsius: %02d C </h2></p>\
+        <p><h2 style=\"color:#%x;\"> Temperature Farenheit: %02d F </h2></p>\
+        <p><h2>Temperature Set : %02d F </h2></p>\
+        <p><h2 style =\"color:#%x;\">Fan state : %02d  </h2></p>\
+        <p>Probe 1 Temp : %02d F</p>\
         <p>Probe 2 Temp : %02d F</p>\
-        <p>Probe 3 Temp : %02d F</p>\
         <form action=/settings  method=POST >\
         <p>Set Temperature F\
-        <input type=text name=setTemp autofocus>\
+        <input type=text name=setTemp >\
         <input type=submit value=Set></form>\
       </body>\
     </html>",
 
-    hr, min % 60, sec % 60 , int(tempC), int(tempF) ,tempSet ,probe1Temp , probe2Temp , probe3Temp 
+    hr, min % 60, sec % 60 , tempTextColor , int(tempC), tempTextColor, int(tempF) ,tempSet , controllerStateColor , controllerState , probe2Temp , probe3Temp 
   );
   server.send ( 200, "text/html", temp );
 }
@@ -117,6 +119,21 @@ void wifiConnect(){
   }
 }
 
+int selectTempTextColor(){
+  if( tempF <= tempSet - 20 || tempF >= tempSet + 20)
+  //return red
+    return 13369344;
+  else
+  //return green
+    return 39168;
+}
+
+int selectControllerStateColor(){
+  if(!controllerState)
+    return 13369344;
+  else
+    return 39168;
+}
 void setup(void)
 {
   Serial.begin(115200);
@@ -138,9 +155,11 @@ void loop(void)
 {
   tempC = getTemperatureC();
   tempF = getTemperatureF();
+  tempTextColor = selectTempTextColor();
+  controllerStateColor = selectControllerStateColor();
   server.handleClient();
 
-  //updateThingSpeak("1=" + String((int)humidity) + "&2=" + String((int)tempC) + "&3=" + String(humidifierStatus) + "&4=" + String(probe1Temp) + "&5=" + String(probe2Temp));
+  //updateThingSpeak("1=" + String((int)humidity) + "&2=" + String((int)tempC) + "&3=" + String(humidifierStatus) + "&4=" + String(controllerStatus) + "&5=" + String(probe2Temp));
 } 
  
 
