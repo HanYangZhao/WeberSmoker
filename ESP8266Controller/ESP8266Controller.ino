@@ -15,6 +15,7 @@
 Adafruit_MAX31855 thermocouple(MAXCLK, MAXCS, MAXDO);
 const char *ssid = "webersmoker";
 const char *password = "saintbbq";
+int channel = 8;
 
 ESP8266WebServer server(80);
  
@@ -139,7 +140,7 @@ void setup(void)
   Serial.begin(115200);
   Serial.println();
   Serial.print("Configuring access point...");
-  WiFi.softAP(ssid, password);
+  WiFi.softAP(ssid, password,channel);
   IPAddress myIP = WiFi.softAPIP();
   Serial.print("AP IP address: ");
   Serial.println(myIP);
