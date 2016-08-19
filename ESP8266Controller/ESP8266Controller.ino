@@ -21,7 +21,7 @@ int channel = 8;
 
 ESP8266WebServer server(80);
 
-
+double previousTemp = 0.0;
 double pidTemp = 0.0; 
 int tempC = 0;
 int tempF = 0;
@@ -33,7 +33,10 @@ int controllerStateColor = 39168;
 // Generally, you should use "unsigned long" for variables that hold time
 unsigned long previousMillis = 0;        // will store last temp was read
 const long interval = 5000;              // interval at which to read sensor
+const long recoveryTime = 180000;        // disable the fan for 3 minutes after we open the lid
+long timeout = 0;
 bool isOn = false;
+bool lidOpen = false;
 double fanOutput = 0.0;
 
 PID myPID(&pidTemp, &fanOutput, &tempSet,2,5,1, DIRECT);
@@ -217,6 +220,7 @@ void loop(void)
     previousMillis = currentMillis;
     sensors.requestTemperatures();
     tempC = (int) getTemperatureC(probe1);
+    previousTemp = pidTemp;
     pidTemp =  getTemperatureF(probe1);
     tempF = (int) pidTemp;
     Serial.println(tempF);
@@ -224,13 +228,28 @@ void loop(void)
     //probe3Temp = getTemperatureF(probe3);
     Serial.println("");
     Serial.println(probe2Temp);
- }
 
-  myPID.Compute();
+    if(previousTemp - pidTemp > 15){
+      lidOpen = true;
+      timeout = millis();
+    }
+ }
+ if(millis() - timeout > recoveryTime){
+  lidOpen = false;
+ }
+ //lid opened
+
+
+ if(lidOpen == false){
+    myPID.Compute();
+    
+  }
+  
+  analogWrite(15, (int) fanOutput * 4);
   tempTextColor = selectTempTextColor();
   controllerStateColor = selectControllerStateColor();
   server.handleClient();
-  analogWrite(15, (int) fanOutput * 4);
+  
   //updateThingSpeak("1=" + String((int)humidity) + "&2=" + String((int)tempC) + "&3=" + String(humidifierStatus) + "&4=" + String(controllerStatus) + "&5=" + String(probe2Temp));
 
     //send-receive with processing if it's time
