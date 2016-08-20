@@ -107,7 +107,7 @@ void handleSetting(){
 double getTemperatureC(DeviceAddress deviceAddress ) {
   float c = sensors.getTempC(deviceAddress);
   if (isnan(c)) {
-     return -999;
+     return 9999;
    } else {
      return c;
    }
@@ -116,7 +116,7 @@ double getTemperatureC(DeviceAddress deviceAddress ) {
 double getTemperatureF(DeviceAddress deviceAddress ) {
   float c = sensors.getTempC(deviceAddress);
   if (isnan(c)) {
-     return -999;
+     return 9999;
    } else {
      return DallasTemperature::toFahrenheit(c);
    }
@@ -229,7 +229,7 @@ void loop(void)
     Serial.println("");
     Serial.println(probe2Temp);
 
-    if(previousTemp - pidTemp > 15){
+    if(previousTemp - pidTemp > 15 && previousTemp < 9998){
       lidOpen = true;
       timeout = millis();
     }
