@@ -25,7 +25,8 @@ double previousTemp = 0.0;
 double pidTemp = 0.0; 
 int tempC = 0;
 int tempF = 0;
-double tempSet = 225.0;
+int tempSet = 225;
+double tempSetPid = 225.0;
 int probe2Temp = 0;
 int probe3Temp = 0;
 int tempTextColor = 3368448;
@@ -39,7 +40,7 @@ bool isOn = false;
 bool lidOpen = false;
 double fanOutput = 0.0;
 
-PID myPID(&pidTemp, &fanOutput, &tempSet,2,5,1, DIRECT);
+PID myPID(&pidTemp, &fanOutput, &tempSetPid,2,5,1, DIRECT);
 
 // Setup a oneWire instance to communicate with any OneWire devices (not just Maxim/Dallas temperature ICs)
 OneWire oneWire(ONE_WIRE_BUS);
@@ -97,6 +98,7 @@ void handleSetting(){
       if (server.argName(i) == "setTemp") {
         Serial.println("Arg "+ String(i)+"="+ server.arg(i));
         tempSet = server.arg(i).toInt();
+        tempSetPid = tempSet;
         Serial.println("probe2Temp" + probe2Temp);
       }
    }
@@ -314,7 +316,7 @@ void SerialReceive()
   // read it into the system
   if(index==26  && (Auto_Man==0 || Auto_Man==1)&& (Direct_Reverse==0 || Direct_Reverse==1))
   {
-    tempSet=double(foo.asFloat[0]);
+    tempSetPid=double(foo.asFloat[0]);
     //Input=double(foo.asFloat[1]);       // * the user has the ability to send the 
                                           //   value of "Input"  in most cases (as 
                                           //   in this one) this is not needed.
@@ -345,7 +347,7 @@ void SerialReceive()
 void SerialSend()
 {
   Serial.print("PID ");
-  Serial.print(tempSet);   
+  Serial.print(tempSetPid);   
   Serial.print(" ");
   Serial.print(pidTemp);   
   Serial.print(" ");
