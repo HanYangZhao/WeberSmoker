@@ -7,6 +7,18 @@
 #include <OneWire.h>
 #include <DallasTemperature.h>
 #include <PID_v1.h>
+#include <PID_AutoTune_v0.h>
+
+byte ATuneModeRemember=2;
+double kp=2,ki=0.5,kd=2;
+
+double kpmodel=1.5, taup=100, theta[50];
+double outputStart=5;
+double aTuneStep=50, aTuneNoise=1, aTuneStartValue=100;
+unsigned int aTuneLookBack=20;
+
+boolean tuning = false;
+unsigned long  modelTime, serialTime;
 
 
 
@@ -25,22 +37,24 @@ double previousTemp = 0.0;
 double pidTemp = 0.0; 
 int tempC = 0;
 int tempF = 0;
-int tempSet = 225;
-double tempSetPid = 225.0;
+int tempSet = 250;
+double tempSetPid = 250.0;
 int probe2Temp = 0;
 int probe3Temp = 0;
 int tempTextColor = 3368448;
 int controllerStateColor = 39168;
 // Generally, you should use "unsigned long" for variables that hold time
 unsigned long previousMillis = 0;        // will store last temp was read
-const long interval = 5000;              // interval at which to read sensor
+const long interval = 100;              // interval at which to read sensor
 const long recoveryTime = 180000;        // disable the fan for 3 minutes after we open the lid
 long timeout = 0;
 bool isOn = false;
 bool lidOpen = false;
 double fanOutput = 0.0;
 
-PID myPID(&pidTemp, &fanOutput, &tempSetPid,2,5,1, DIRECT);
+PID myPID(&pidTemp, &fanOutput, &tempSetPid,kp,ki,kd , DIRECT);
+PID_ATune aTune(&pidTemp, &fanOutput);
+
 
 // Setup a oneWire instance to communicate with any OneWire devices (not just Maxim/Dallas temperature ICs)
 OneWire oneWire(ONE_WIRE_BUS);
@@ -51,7 +65,6 @@ DallasTemperature sensors(&oneWire);
 // arrays to hold device addresses
 DeviceAddress probe1, probe2, probe3;
 
-unsigned long serialTime; //this will help us know when to talk with processing
 
 //root webapge
 void handleRoot(){
@@ -63,7 +76,7 @@ void handleRoot(){
 
     "<html>\
       <head>\
-        <meta http-equiv='refresh' content='10'/>\
+        <meta http-equiv='refresh' content='5'/>\
         <title>ESP8266 Demo</title>\
         <style>\
           body { background-color: #cccccc; font-family: Arial, Helvetica, Sans-Serif; Color: #000088; text-align: center; font-size:200%; }\
@@ -75,7 +88,7 @@ void handleRoot(){
         <p><h2 style=\"color:#%x;\"> Temperature Celsius: %d C </h2></p>\
         <p><h2 style=\"color:#%x;\"> Temperature Farenheit: %d F </h2></p>\
         <p><h2>Temperature Set : %d F </h2></p>\
-        <p><h2 style =\"color:#%x;\">Fan state : %d  </h2></p>\
+        <p><h2 style =\"color:#%x;\">Fan Output : %d  % </h2></p>\
         <p>Probe 2 Temp : %d F</p>\
         <p>Probe 3 Temp : %d F</p>\
         <form action=/settings  method=POST >\
@@ -85,7 +98,7 @@ void handleRoot(){
       </body>\
     </html>",
 
-    hr, min % 60, sec % 60 , tempTextColor , int(tempC), tempTextColor, int(tempF) ,(int) tempSet , controllerStateColor , (int) fanOutput , probe2Temp , probe3Temp 
+    hr, min % 60, sec % 60 , tempTextColor , int(tempC), tempTextColor, int(tempF) ,(int) tempSet , controllerStateColor , (int) ((float) fanOutput / 1024.0 * 100.0), probe2Temp , probe3Temp 
   );
   server.send ( 200, "text/html", temp );
 }
@@ -166,7 +179,18 @@ void setup(void)
   Serial.println(" devices.");
 
   myPID.SetMode(AUTOMATIC);
+  myPID.SetOutputLimits(0,1024);
+  myPID.SetSampleTime(100);
 
+   if(tuning)
+  {
+    tuning=false;
+    changeAutoTune();
+    tuning=true;
+  }
+  
+  serialTime = 0;
+  
   Serial.print("Parasite power is: "); 
   if (sensors.isParasitePowerMode()) Serial.println("ON");
   else Serial.println("OFF");
@@ -199,10 +223,15 @@ void setup(void)
   Serial.println();
   
   Serial.print("Configuring access point...");
-  WiFi.softAP(ssid, password,channel);
-  IPAddress myIP = WiFi.softAPIP();
-  Serial.print("AP IP address: ");
-  Serial.println(myIP);
+  WiFi.mode(WIFI_AP);
+  IPAddress apIP(192,168,1,1);
+  WiFi.softAPConfig(apIP,apIP, IPAddress(255,255,255,0));
+  //IPAddress myIP = WiFi.softAPIP();
+  //Serial.print("AP IP address: ");
+  //Serial.println(myIP);
+  WiFi.softAP("Weber Smoker Controller");
+
+  //dnsServer.start(DNS_PORT, "*" , apIP);
   
   server.begin();
 
@@ -234,20 +263,38 @@ void loop(void)
     if(previousTemp - pidTemp > 15 && previousTemp < 9998){
       lidOpen = true;
       timeout = millis();
+      fanOutput = 0;
     }
  }
- if(millis() - timeout > recoveryTime){
-  lidOpen = false;
- }
- //lid opened
 
-
- if(lidOpen == false){
-    myPID.Compute();
-    
+  if(tuning)
+  {
+    byte val = (aTune.Runtime());
+    if (val!=0)
+    {
+      tuning = false;
+    }
+    if(!tuning)
+    { //we're done, set the tuning parameters
+      kp = aTune.GetKp();
+      ki = aTune.GetKi();
+      kd = aTune.GetKd();
+      myPID.SetTunings(kp,ki,kd);
+      AutoTuneHelper(false);
+    }
   }
+  else {
+   if(millis() - timeout > recoveryTime){
+    lidOpen = false;
+   }
   
-  analogWrite(15, (int) fanOutput * 4);
+   if(lidOpen == false){
+      myPID.Compute();
+      
+    }
+    
+    analogWrite(15, (int) fanOutput );
+  }
   tempTextColor = selectTempTextColor();
   controllerStateColor = selectControllerStateColor();
   server.handleClient();
@@ -263,107 +310,163 @@ void loop(void)
   }
 } 
 
+void changeAutoTune()
+{
+ if(!tuning)
+  {
+    //Set the output to the desired starting frequency.
+    fanOutput=aTuneStartValue;
+    aTune.SetNoiseBand(aTuneNoise);
+    aTune.SetOutputStep(aTuneStep);
+    aTune.SetLookbackSec((int)aTuneLookBack);
+    AutoTuneHelper(true);
+    tuning = true;
+  }
+  else
+  { //cancel autotune
+    Serial.println("Canceling Autotune");
+    aTune.Cancel();
+    tuning = false;
+    kp = aTune.GetKp();
+    ki = aTune.GetKi();
+    kd = aTune.GetKd();
+    AutoTuneHelper(false);
+  }
+}
+
+void AutoTuneHelper(boolean start)
+{
+  if(start)
+    ATuneModeRemember = myPID.GetMode();
+  else
+    myPID.SetMode(ATuneModeRemember);
+}
+
+void SerialSend()
+{
+  Serial.print("setpoint: ");Serial.print(tempSetPid); Serial.print(" ");
+  Serial.print("input: ");Serial.print(pidTemp); Serial.print(" ");
+  Serial.print("output: ");Serial.print(fanOutput); Serial.print(" ");
+  if(tuning){
+    Serial.println("tuning mode");
+  } else {
+    Serial.print("kp: ");Serial.print(myPID.GetKp());Serial.print(" ");
+    Serial.print("ki: ");Serial.print(myPID.GetKi());Serial.print(" ");
+    Serial.print("kd: ");Serial.print(myPID.GetKd());Serial.println();
+  }
+}
+
+void SerialReceive()
+{
+  if(Serial.available())
+  {
+   char b = Serial.read(); 
+   Serial.flush(); 
+   if((b=='1' && !tuning) || (b=='0' && tuning))changeAutoTune();
+  }
+}
+
 
 /********************************************
  * Serial Communication functions / helpers
  ********************************************/
 
 
-union {                // This Data structure lets
-  byte asBytes[24];    // us take the byte array
-  float asFloat[6];    // sent from processing and
-}                      // easily convert it to a
-foo;                   // float array
-
-
-
-// getting float values from processing into the arduino
-// was no small task.  the way this program does it is
-// as follows:
-//  * a float takes up 4 bytes.  in processing, convert
-//    the array of floats we want to send, into an array
-//    of bytes.
-//  * send the bytes to the arduino
-//  * use a data structure known as a union to convert
-//    the array of bytes back into an array of floats
-
-//  the bytes coming from the arduino follow the following
-//  format:
-//  0: 0=Manual, 1=Auto, else = ? error ?
-//  1: 0=Direct, 1=Reverse, else = ? error ?
-//  2-5: float setpoint
-//  6-9: float input
-//  10-13: float output  
-//  14-17: float P_Param
-//  18-21: float I_Param
-//  22-245: float D_Param
-void SerialReceive()
-{
-
-  // read the bytes sent from Processing
-  int index=0;
-  byte Auto_Man = -1;
-  byte Direct_Reverse = -1;
-  while(Serial.available()&&index<26)
-  {
-    if(index==0) Auto_Man = Serial.read();
-    else if(index==1) Direct_Reverse = Serial.read();
-    else foo.asBytes[index-2] = Serial.read();
-    index++;
-  } 
-  
-  // if the information we got was in the correct format, 
-  // read it into the system
-  if(index==26  && (Auto_Man==0 || Auto_Man==1)&& (Direct_Reverse==0 || Direct_Reverse==1))
-  {
-    tempSetPid=double(foo.asFloat[0]);
-    //Input=double(foo.asFloat[1]);       // * the user has the ability to send the 
-                                          //   value of "Input"  in most cases (as 
-                                          //   in this one) this is not needed.
-    if(Auto_Man==0)                       // * only change the output if we are in 
-    {                                     //   manual mode.  otherwise we'll get an
-     fanOutput=double(foo.asFloat[2]);      //   output blip, then the controller will 
-    }                                     //   overwrite.
-    
-    double p, i, d;                       // * read in and set the controller tunings
-    p = double(foo.asFloat[3]);           //
-    i = double(foo.asFloat[4]);           //
-    d = double(foo.asFloat[5]);           //
-    myPID.SetTunings(p, i, d);            //
-    
-    if(Auto_Man==0) myPID.SetMode(MANUAL);// * set the controller mode
-    else myPID.SetMode(AUTOMATIC);             //
-    
-    if(Direct_Reverse==0) myPID.SetControllerDirection(DIRECT);// * set the controller Direction
-    else myPID.SetControllerDirection(REVERSE);          //
-  }
-  Serial.flush();                         // * clear any random data from the serial buffer
-}
-
-// unlike our tiny microprocessor, the processing ap
-// has no problem converting strings into floats, so
-// we can just send strings.  much easier than getting
-// floats from processing to here no?
-void SerialSend()
-{
-  Serial.print("PID ");
-  Serial.print(tempSetPid);   
-  Serial.print(" ");
-  Serial.print(pidTemp);   
-  Serial.print(" ");
-  Serial.print(fanOutput);   
-  Serial.print(" ");
-  Serial.print(myPID.GetKp());   
-  Serial.print(" ");
-  Serial.print(myPID.GetKi());   
-  Serial.print(" ");
-  Serial.print(myPID.GetKd());   
-  Serial.print(" ");
-  if(myPID.GetMode()==AUTOMATIC) Serial.print("Automatic");
-  else Serial.print("Manual");  
-  Serial.print(" ");
-  if(myPID.GetDirection()==DIRECT) Serial.println("Direct");
-  else Serial.println("Reverse");
-}
+//union {                // This Data structure lets
+//  byte asBytes[24];    // us take the byte array
+//  float asFloat[6];    // sent from processing and
+//}                      // easily convert it to a
+//foo;                   // float array
+//
+//
+//
+//// getting float values from processing into the arduino
+//// was no small task.  the way this program does it is
+//// as follows:
+////  * a float takes up 4 bytes.  in processing, convert
+////    the array of floats we want to send, into an array
+////    of bytes.
+////  * send the bytes to the arduino
+////  * use a data structure known as a union to convert
+////    the array of bytes back into an array of floats
+//
+////  the bytes coming from the arduino follow the following
+////  format:
+////  0: 0=Manual, 1=Auto, else = ? error ?
+////  1: 0=Direct, 1=Reverse, else = ? error ?
+////  2-5: float setpoint
+////  6-9: float input
+////  10-13: float output  
+////  14-17: float P_Param
+////  18-21: float I_Param
+////  22-245: float D_Param
+//void SerialReceive()
+//{
+//
+//  // read the bytes sent from Processing
+//  int index=0;
+//  byte Auto_Man = -1;
+//  byte Direct_Reverse = -1;
+//  while(Serial.available()&&index<26)
+//  {
+//    if(index==0) Auto_Man = Serial.read();
+//    else if(index==1) Direct_Reverse = Serial.read();
+//    else foo.asBytes[index-2] = Serial.read();
+//    index++;
+//  } 
+//  
+//  // if the information we got was in the correct format, 
+//  // read it into the system
+//  if(index==26  && (Auto_Man==0 || Auto_Man==1)&& (Direct_Reverse==0 || Direct_Reverse==1))
+//  {
+//    tempSetPid=double(foo.asFloat[0]);
+//    //Input=double(foo.asFloat[1]);       // * the user has the ability to send the 
+//                                          //   value of "Input"  in most cases (as 
+//                                          //   in this one) this is not needed.
+//    if(Auto_Man==0)                       // * only change the output if we are in 
+//    {                                     //   manual mode.  otherwise we'll get an
+//     fanOutput=double(foo.asFloat[2]);      //   output blip, then the controller will 
+//    }                                     //   overwrite.
+//    
+//    double p, i, d;                       // * read in and set the controller tunings
+//    p = double(foo.asFloat[3]);           //
+//    i = double(foo.asFloat[4]);           //
+//    d = double(foo.asFloat[5]);           //
+//    myPID.SetTunings(p, i, d);            //
+//    
+//    if(Auto_Man==0) myPID.SetMode(MANUAL);// * set the controller mode
+//    else myPID.SetMode(AUTOMATIC);             //
+//    
+//    if(Direct_Reverse==0) myPID.SetControllerDirection(DIRECT);// * set the controller Direction
+//    else myPID.SetControllerDirection(REVERSE);          //
+//  }
+//  Serial.flush();                         // * clear any random data from the serial buffer
+//}
+//
+//// unlike our tiny microprocessor, the processing ap
+//// has no problem converting strings into floats, so
+//// we can just send strings.  much easier than getting
+//// floats from processing to here no?
+//void SerialSend()
+//{
+//  Serial.print("PID ");
+//  Serial.print(tempSetPid);   
+//  Serial.print(" ");
+//  Serial.print(pidTemp);   
+//  Serial.print(" ");
+//  Serial.print(fanOutput);   
+//  Serial.print(" ");
+//  Serial.print(myPID.GetKp());   
+//  Serial.print(" ");
+//  Serial.print(myPID.GetKi());   
+//  Serial.print(" ");
+//  Serial.print(myPID.GetKd());   
+//  Serial.print(" ");
+//  if(myPID.GetMode()==AUTOMATIC) Serial.print("Automatic");
+//  else Serial.print("Manual");  
+//  Serial.print(" ");
+//  if(myPID.GetDirection()==DIRECT) Serial.println("Direct");
+//  else Serial.println("Reverse");
+//}
 
 
