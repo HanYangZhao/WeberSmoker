@@ -3,28 +3,40 @@
  */
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
+
 #include <String.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
 #include <PID_v1.h>
 #include <PID_AutoTune_v0.h>
 
-byte ATuneModeRemember=2;
-double kp=2,ki=0.5,kd=2;
+
+//byte ATuneModeRemember=2;
+double kp=35.21,ki=2,kd=30;
 
 double kpmodel=1.5, taup=100, theta[50];
 double outputStart=5;
-double aTuneStep=50, aTuneNoise=1, aTuneStartValue=100;
+double aTuneStep=100, aTuneNoise=1, aTuneStartValue=50;
 unsigned int aTuneLookBack=20;
 
-boolean tuning = false;
+byte ATuneModeRemember;
 unsigned long  modelTime, serialTime;
+int modelStep, tuningStep;
+boolean tuning = false;
 
 
+//#define USE_SIMULATION
+//#define SIMULATION_MODEL_BALANCED_LAG_AND_DELAY
+
+
+
+extern Tuning tuningRule[];
 
 // Data wire is plugged into port 2 on the Arduino
 #define ONE_WIRE_BUS 4 
 #define TEMPERATURE_PRECISION 9
+
+
 
 // initialize the Thermocouple
 const char *ssid = "webersmoker";
@@ -52,9 +64,9 @@ bool isOn = false;
 bool lidOpen = false;
 double fanOutput = 0.0;
 
+
 PID myPID(&pidTemp, &fanOutput, &tempSetPid,kp,ki,kd , DIRECT);
 PID_ATune aTune(&pidTemp, &fanOutput);
-
 
 // Setup a oneWire instance to communicate with any OneWire devices (not just Maxim/Dallas temperature ICs)
 OneWire oneWire(ONE_WIRE_BUS);
@@ -179,6 +191,7 @@ void setup(void)
   Serial.println(" devices.");
 
   myPID.SetMode(AUTOMATIC);
+  aTune.SetControlType(PID_ATune::TYREUS_LUYBEN_PI);
   myPID.SetOutputLimits(0,1024);
   myPID.SetSampleTime(100);
 
@@ -284,17 +297,21 @@ void loop(void)
     }
   }
   else {
-   if(millis() - timeout > recoveryTime){
-    lidOpen = false;
-   }
-  
-   if(lidOpen == false){
-      myPID.Compute();
-      
-    }
-    
+    //tuningStep = 0;
+    myPID.Compute();
+  }
+  if(fanOutput <= 0){
+    fanOutput = 0;
+    analogWrite(15,0);
+  }
+  else if(pidTemp >= tempSet){
+    fanOutput = 0;
+    analogWrite(15,0);
+  }
+  else{
     analogWrite(15, (int) fanOutput );
   }
+  
   tempTextColor = selectTempTextColor();
   controllerStateColor = selectControllerStateColor();
   server.handleClient();
